@@ -65,15 +65,14 @@ int main(int argc, char * argv[]) {
     int probe_count = 0;
 
     int s_num = 0;    // TODO 10 sec packet count
-    int tag_count = 0;
+    int tagged_size = 0;
+    u_char * tag_data;
 
     int check = 0;
     int cnt = 0;
 
     int MB = 0;
     int rsn = 0;
-
-    u_char * tagged_mode;
 
     radiotap_header * radiotap;
     ieee80211_header * ieee80211;
@@ -127,7 +126,7 @@ int main(int argc, char * argv[]) {
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
 
-                tag_count = header->caplen - sizeof(radiotap_header) - sizeof(ieee80211_header) - sizeof(fixed_parameter);
+                tagged_size = header->caplen - sizeof(radiotap_header) - sizeof(ieee80211_header) - sizeof(fixed_parameter);
 
                 if (fixed->capabilities_privacy == 0) {
                     strncpy(beacon_info[beacon_count].ENC, "OPN", sizeof(beacon_info[beacon_count].ENC));
@@ -135,16 +134,16 @@ int main(int argc, char * argv[]) {
                     strncpy(beacon_info[beacon_count].AUTH, " ", sizeof(beacon_info[beacon_count].AUTH));
                 }
 
-                while (tag_count > 0) {
-                    tagged_mode = (u_char *)tagged + sizeof(tagged_parameter);
+                while (tagged_size > 0) {
+                    tag_data = (u_char *)tagged + sizeof(tagged_parameter);
                     switch(tagged->tag_number) {
                         case 0x00:    // SSID
-                            strncpy(beacon_info[beacon_count].ESSID, tagged_mode, tagged->tag_length);
+                            strncpy(beacon_info[beacon_count].ESSID, tag_data, tagged->tag_length);
                             break;
 
                         case 0x01:    // SUPORTED DATA RATES
                         case 0x32:    // EXTENDED SUPPORTED RATES
-                            switch (*(uint8_t *)(tagged_mode + tagged->tag_length -1)) {
+                            switch (*(uint8_t *)(tag_data + tagged->tag_length -1)) {
                                 case 0x81:
                                     MB = 1;
                                     break;
@@ -184,12 +183,12 @@ int main(int argc, char * argv[]) {
                             break;
 
                         case 0x03:    // DIRECT SEQUNCE CHANNEL SET
-                            beacon_info[beacon_count].CH = *(uint8_t *)(tagged_mode);
+                            beacon_info[beacon_count].CH = *(uint8_t *)(tag_data);
                             break;
 
                         case 0x30:    // RSN INFORMATION ELEMENT
                             rsn = 5;
-                            switch (*(uint8_t *)(tagged_mode + rsn)) {    // Group Cipher Suite Type
+                            switch (*(uint8_t *)(tag_data + rsn)) {    // Group Cipher Suite Type
                                 case 0x01:    // WEP 40
                                     strncpy(beacon_info[beacon_count].CIPHER, "WEP", 4);
                                     strncpy(beacon_info[beacon_count].ENC, "WEP", 4);
@@ -218,15 +217,15 @@ int main(int argc, char * argv[]) {
                                     break;
                             }
 
-                            rsn += 2 + *(uint16_t *)(tagged_mode + rsn + 1) * 4;
-                            switch(*(uint8_t *)(tagged_mode + rsn)) {    // Pairwise Cipher Suite Type
+                            rsn += 2 + *(uint16_t *)(tag_data + rsn + 1) * 4;
+                            switch(*(uint8_t *)(tag_data + rsn)) {    // Pairwise Cipher Suite Type
                                 case 0x04:
                                     strncpy(beacon_info[beacon_count].ENC, "WPA2", 5);
                                     break;
                             }
 
-                            rsn += 2 + *(uint16_t *)(tagged_mode + rsn + 1) * 4;
-                            switch(*(uint8_t *)(tagged_mode + rsn)) {    // Auth Key Management Type
+                            rsn += 2 + *(uint16_t *)(tag_data + rsn + 1) * 4;
+                            switch(*(uint8_t *)(tag_data + rsn)) {    // Auth Key Management Type
                                 case 0x01:
                                     strncpy(beacon_info[beacon_count].AUTH, "MGT", 4); 
                                     break;
@@ -260,8 +259,8 @@ int main(int argc, char * argv[]) {
                         deault:
                             break;
                     }
-		    tag_count -= sizeof(tagged_parameter) + tagged->tag_length;
-		    tagged = (tagged_parameter *)(tagged_mode + tagged->tag_length);
+		    tagged_size -= sizeof(tagged_parameter) + tagged->tag_length;
+		    tagged = (tagged_parameter *)(tag_data + tagged->tag_length);
                 }
 
                 beacon_count++;
@@ -294,9 +293,9 @@ int main(int argc, char * argv[]) {
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
 
-                tag_count = header->caplen - sizeof(radiotap_header) - sizeof(ieee80211_header) - sizeof(fixed_parameter);
+                tagged_size = header->caplen - sizeof(radiotap_header) - sizeof(ieee80211_header) - sizeof(fixed_parameter);
 
-                while (tag_count > 0) {
+                while (tagged_size > 0) {
                     switch(tagged->tag_number) {
                         case 0x00:    // SSID
                             strncpy(probe_info[probe_count].PROBE, (u_char *)tagged + sizeof(tagged_parameter), tagged->tag_length);    // TODO incomplete
@@ -305,7 +304,7 @@ int main(int argc, char * argv[]) {
                         default:
                             break;
                     }
-                    tag_count -= sizeof(tagged_parameter) + tagged->tag_length;
+                    tagged_size -= sizeof(tagged_parameter) + tagged->tag_length;
                     tagged = (tagged_parameter *)((u_char *)tagged + sizeof(tagged_parameter) + tagged->tag_length);
                 }
 
