@@ -71,6 +71,9 @@ int main(int argc, char * argv[]) {
     int cnt = 0;
 
     int MB = 0;
+    int rsn = 0;
+
+    u_char * tagged_mode;
 
     radiotap_header * radiotap;
     ieee80211_header * ieee80211;
@@ -133,14 +136,15 @@ int main(int argc, char * argv[]) {
                 }
 
                 while (tag_count > 0) {
+                    tagged_mode = (u_char *)tagged + sizeof(tagged_parameter);
                     switch(tagged->tag_number) {
                         case 0x00:    // SSID
-                            strncpy(beacon_info[beacon_count].ESSID, (u_char *)tagged + sizeof(tagged_parameter), tagged->tag_length);
+                            strncpy(beacon_info[beacon_count].ESSID, tagged_mode, tagged->tag_length);
                             break;
 
                         case 0x01:    // SUPORTED DATA RATES
                         case 0x32:    // EXTENDED SUPPORTED RATES
-                            switch (*(uint8_t *)((u_char *)tagged + sizeof(tagged_parameter) + tagged->tag_length -1)) {
+                            switch (*(uint8_t *)(tagged_mode + tagged->tag_length -1)) {
                                 case 0x81:
                                     MB = 1;
                                     break;
@@ -180,11 +184,12 @@ int main(int argc, char * argv[]) {
                             break;
 
                         case 0x03:    // DIRECT SEQUNCE CHANNEL SET
-                            beacon_info[beacon_count].CH = *(uint8_t *)((u_char *)tagged + sizeof(tagged_parameter));
+                            beacon_info[beacon_count].CH = *(uint8_t *)(tagged_mode);
                             break;
 
                         case 0x30:    // RSN INFORMATION ELEMENT
-                            switch (*(uint8_t *)((u_char *)tagged + sizeof(tagged_parameter) + 5)) {    // Group Cipher Suite Type
+                            rsn = 5;
+                            switch (*(uint8_t *)(tagged_mode + rsn)) {    // Group Cipher Suite Type
                                 case 0x01:    // WEP 40
                                     strncpy(beacon_info[beacon_count].CIPHER, "WEP", 4);
                                     strncpy(beacon_info[beacon_count].ENC, "WEP", 4);
@@ -213,13 +218,15 @@ int main(int argc, char * argv[]) {
                                     break;
                             }
 
-                            switch(*(uint8_t *)((u_char *)tagged + sizeof(tagged_parameter) + 11)) {    // Pairwise Cipher Suite Type
+                            rsn += 2 + *(uint16_t *)(tagged_mode + rsn + 1) * 4;
+                            switch(*(uint8_t *)(tagged_mode + rsn)) {    // Pairwise Cipher Suite Type
                                 case 0x04:
                                     strncpy(beacon_info[beacon_count].ENC, "WPA2", 5);
                                     break;
                             }
 
-                            switch(*(uint8_t *)((u_char *)tagged + sizeof(tagged_parameter) + 17)) {    // Auth Key Management Type
+                            rsn += 2 + *(uint16_t *)(tagged_mode + rsn + 1) * 4;
+                            switch(*(uint8_t *)(tagged_mode + rsn)) {    // Auth Key Management Type
                                 case 0x01:
                                     strncpy(beacon_info[beacon_count].AUTH, "MGT", 4); 
                                     break;
@@ -254,7 +261,7 @@ int main(int argc, char * argv[]) {
                             break;
                     }
 		    tag_count -= sizeof(tagged_parameter) + tagged->tag_length;
-		    tagged = (tagged_parameter *)((u_char *)tagged + sizeof(tagged_parameter) + tagged->tag_length);
+		    tagged = (tagged_parameter *)(tagged_mode + tagged->tag_length);
                 }
 
                 beacon_count++;
