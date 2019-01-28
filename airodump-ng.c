@@ -3,18 +3,27 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <pthread.h>
 #include <time.h>
-
 #include <pcap.h>
 
 #include "airodump-ng.h"
 
+int channel_array[] = {1, 7, 13, 2, 8, 3, 14, 9, 4, 10, 5, 11, 6, 12};    // Channel Hopping 1 ~ 14
+int channel_count = 0;    // 0 ~ 13
+
+long long time_count = 0;
+int elapsed =  0;
+
+int beacon_count = 0;
+int probe_count = 0;
+
+beacon_information beacon_info[100];
+probe_information probe_info[100];
+
 void usage() {
-    printf("usage: ./airodump-ng <options> <interface>\n");
+    printf("usage: ./airodump-ng <interface>\n");
     printf("sample: ./airodump-ng -c 1 mon0\n\n");
-    printf("Options:\n");
-    printf("\t--channel <channels>   : Capture on specific channels\n");
-    printf("\t-c <channels>          : same as --channel <channels>\n");
 }
 
 void print_mac(uint8_t * MAC_address) {
@@ -28,8 +37,8 @@ void display(int beacon_count, int probe_count, beacon_information * pbeacon, pr
     date = localtime(&t);
 
     printf("\e[2J\e[H\e[?25l");    // \e[2J : clear entire screen, \e[H : move cursor to upper left corner, \e[?25l : hide cursor
-    printf("\n CH %2d", 11);    // TODO incomplete
-    printf(" ][ Elapsed: %d s", 8);    // TODO incomplete
+    printf("\n CH %2d", channel_array[channel_count]);    // TODO incomplete
+    printf(" ][ Elapsed: %d s", elapsed);    // TODO incomplete
     printf(" ][ %4d-%02d-%02d %02d:%02d", date->tm_year + 1900, date->tm_mon + 1, date->tm_mday, date->tm_hour, date->tm_min);
     // printf(" ][ WPA handshake: %18s");
 
@@ -52,6 +61,31 @@ void display(int beacon_count, int probe_count, beacon_information * pbeacon, pr
     printf("\n");
 }
 
+long long tickCount()
+{
+    struct timeval te; 
+    gettimeofday(&te, NULL);
+    long long milliseconds = te.tv_sec*1000LL + te.tv_usec/1000;
+    return milliseconds;
+}
+
+void * timer(void * dev) {
+    while(1) {
+        char cmd[255];
+        if (tickCount() - time_count > 1000) {    // Every Second
+            time_count = tickCount();
+            elapsed++;
+            snprintf(cmd, sizeof(cmd), "iwconfig %s channel %d", (char *)dev, channel_array[channel_count]);
+            system(cmd);
+
+            display(beacon_count, probe_count, beacon_info, probe_info);
+
+            if (channel_count <= 13) channel_count++;
+            else channel_count = 0;
+        }
+    }
+}
+
 int main(int argc, char * argv[]) {
     char * dev;
     char errbuf[PCAP_ERRBUF_SIZE];
@@ -60,9 +94,11 @@ int main(int argc, char * argv[]) {
     const u_char * packet;
     int res;
 
+    pthread_t p_thread;
+    int thr_id;
+    int status;
+
     int data_count = 0;
-    int beacon_count = 0;
-    int probe_count = 0;
 
     int s_num = 0;    // TODO 10 sec packet count
     int tagged_size = 0;
@@ -71,6 +107,7 @@ int main(int argc, char * argv[]) {
     int check = 0;
     int cnt = 0;
 
+    int pwr = 0;
     int MB = 0;
     int rsn = 0;
 
@@ -79,9 +116,6 @@ int main(int argc, char * argv[]) {
 
     fixed_parameter * fixed;
     tagged_parameter * tagged;
-
-    beacon_information beacon_info[50];
-    probe_information probe_info[50]; 
 
     if (argc < 2) {
         usage();
@@ -95,7 +129,9 @@ int main(int argc, char * argv[]) {
         return -1;
     };
 
-    display(beacon_count, probe_count, beacon_info, probe_info);    // initial screen
+    // display(beacon_count, probe_count, beacon_info, probe_info);    // initial screen
+
+    thr_id = pthread_create(&p_thread, NULL, timer, (void *)argv[argc-1]);
 
     while (1) {
         res = pcap_next_ex(handle, &header, &packet);
@@ -104,13 +140,46 @@ int main(int argc, char * argv[]) {
 
 	radiotap = (radiotap_header *)packet;
         ieee80211 = (ieee80211_header *)(packet + radiotap->length);
-
+/*
+        for (uint32_t pflag = 0; pflag < 32; pflag++) {
+            if (radiotap->present_flag & (1 << pflag)) {
+                switch(pflag) {
+                    case RADIOTAP_TSFT:
+                    case RADIOTAP_FLAGS:
+                    case RADIOTAP_RATE:
+                    case RADIOTAP_CHANNEL:
+                    case RADIOTAP_FHSS:
+                    case RADIOTAP_DBM_ANTSIGNAL:
+                    case RADIOTAP_DBM_ANTNOISE:
+                    case RADIOTAP_LOCK_QUALITY:
+                    case RADIOTAP_TX_ATTENUATION:
+                    case RADIOTAP_DB_TX_ATTENUATION:
+                    case RADIOTAP_DBM_TX_POWER:
+                    case RADIOTAP_ANTENNA:
+                    case RADIOTAP_DB_ANTSIGNAL:
+                    case RADIOTAP_DB_ANTNOISE:
+                    case RADIOTAP_RX_FLAGS:
+                    case RADIOTAP_TX_FLAGS:
+                    case RADIOTAP_RTS_RETRIES:
+                    case RADIOTAP_DATA_RETRIES:
+                    case RADIOTAP_MCS:
+                    case RADIOTAP_AMPDU_STATUS:
+                    case RADIOTAP_VHT:
+                    case RADIOTAP_TIMESTAMP:
+                    case RADIOTAP_RADIOTAP_NAMESPACE:
+                    case RADIOTAP_VENDOR_NAMESPACE:
+                    case RADIOTAP_EXT:
+                        break;
+                } 
+            }
+        }
+*/
         /* [BEACON FRAME] */
         if (ieee80211->frame_control_type == 0x00 && ieee80211->frame_control_subtype == 0x08) {
             for (check = 0, cnt = 0; cnt < beacon_count; cnt++) {
                 if (!memcmp(beacon_info[cnt].BSSID, ieee80211->bssid_addr, sizeof(beacon_info[cnt].BSSID))) {
                     check = 1;
-                    beacon_info[cnt].PWR = (char)radiotap->antenna_signal1;
+                    beacon_info[cnt].PWR = pwr;
                     beacon_info[cnt].BEACONS++;
                     break;
                 }
@@ -118,7 +187,7 @@ int main(int argc, char * argv[]) {
             if (!check) {
                 memcpy(beacon_info[beacon_count].BSSID, ieee80211->bssid_addr, sizeof(beacon_info[beacon_count].BSSID));
  
-                beacon_info[beacon_count].PWR = (char)radiotap->antenna_signal1;
+                beacon_info[beacon_count].PWR = pwr;
                 beacon_info[beacon_count].BEACONS = 1;
                 beacon_info[beacon_count].DATA = data_count;
                 beacon_info[beacon_count].S = s_num;
@@ -126,7 +195,7 @@ int main(int argc, char * argv[]) {
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
 
-                tagged_size = header->caplen - sizeof(radiotap_header) - sizeof(ieee80211_header) - sizeof(fixed_parameter);
+                tagged_size = header->caplen - radiotap->length - sizeof(ieee80211_header) - sizeof(fixed_parameter);
 
                 if (fixed->capabilities_privacy == 0) {
                     strncpy(beacon_info[beacon_count].ENC, "OPN", sizeof(beacon_info[beacon_count].ENC));
@@ -239,6 +308,13 @@ int main(int argc, char * argv[]) {
                                     break;
                             }
                             break;
+
+                        case 0xDD:
+                            if (!memcmp(tag_data, "\x00\x50\xF2\x02\x01\x01", 6)) {
+                                // qos = 1;
+                            }
+                            break;
+
 /*
                         case 0xDD:    // VENDOR SPECIFIC: MICROSOFT CORP
                            switch (*(uint8_t *)((u_char *)tagged + sizeof(tagged_parameter) + 4)) {    // Type
@@ -268,12 +344,12 @@ int main(int argc, char * argv[]) {
             }
         }
 
-        /* [PROBE FRAME] */
+        /* [PROBE RESPONSE FRAME] */
         if (ieee80211->frame_control_type == 0x00 && ieee80211->frame_control_subtype == 0x05) {
             for (check = 0, cnt = 0; cnt < probe_count; cnt++) {
                 if (!memcmp(probe_info[cnt].BSSID, ieee80211->bssid_addr, sizeof(probe_info[cnt].BSSID))) {
                     check = 1;
-                    probe_info[cnt].PWR = (char)radiotap->antenna_signal1;
+                    probe_info[cnt].PWR = pwr;
                     probe_info[cnt].FRAMES++;
 
                     // display(beacon_count, probe_count, beacon_info, probe_info);
@@ -284,7 +360,7 @@ int main(int argc, char * argv[]) {
                 memcpy(probe_info[probe_count].BSSID, ieee80211->bssid_addr, sizeof(probe_info[probe_count].BSSID));
                 memcpy(probe_info[probe_count].STATION, ieee80211->destination_addr, sizeof(probe_info[probe_count].STATION));
 
-                probe_info[probe_count].PWR = (char)radiotap->antenna_signal1;
+                probe_info[probe_count].PWR = pwr;
                 probe_info[probe_count].FRAMES = 1;
 
                 probe_info[probe_count].LOST = 0;    // TODO incomplete
@@ -293,7 +369,7 @@ int main(int argc, char * argv[]) {
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
 
-                tagged_size = header->caplen - sizeof(radiotap_header) - sizeof(ieee80211_header) - sizeof(fixed_parameter);
+                tagged_size = header->caplen - radiotap->length - sizeof(ieee80211_header) - sizeof(fixed_parameter);
 
                 while (tagged_size > 0) {
                     switch(tagged->tag_number) {
@@ -316,6 +392,20 @@ int main(int argc, char * argv[]) {
             }
         }
 
+        /* [PROBE REQUEST FRAME] */
+        if (ieee80211->frame_control_type == 0x00 && ieee80211->frame_control_subtype == 0x04) {
+            //for (check = 0, cnt = 0; cnt < probe_count; cnt++) {
+                //if (!memcmp(probe_info[cnt].BSSID, ieee80211->bssid_addr, sizeof(probbe_info[cnt].STATION))) {
+                    //check = 1;
+                    //probe_info[cnt].PWR = (char)radiotpa->antenna_signal1;
+                    //probe_info[cnt].FRAMES++;
+
+                    //break;
+                //}
+            //}
+        }
+
+
         /* [DATA FRAMES] */
         if (ieee80211->frame_control_type == 0x02) {
             for (cnt = 0; cnt < beacon_count; cnt++) {
@@ -325,7 +415,6 @@ int main(int argc, char * argv[]) {
             }
         }
     }
-
     pcap_close(handle);
     return 0;
 }

@@ -25,17 +25,36 @@ typedef struct _radiotap_header {
     uint8_t version;
     uint8_t pad;
     uint16_t length;
-    uint32_t present_flag[2];
-    uint8_t flags;
-    uint16_t channel_frequency;
-    uint16_t channel_flags;
-    uint8_t data_rate;
-    uint8_t antenna_signal1;
-    uint8_t reserved;
-    uint16_t rx_flags;
-    uint8_t antenna_signal2;
-    uint8_t antenna;
+    uint32_t present_flag;
 } radiotap_header;
+
+enum radiotap_present_flag {
+    RADIOTAP_TSFT = 0,
+    RADIOTAP_FLAGS = 1,
+    RADIOTAP_RATE = 2,
+    RADIOTAP_CHANNEL = 3,
+    RADIOTAP_FHSS = 4,
+    RADIOTAP_DBM_ANTSIGNAL = 5,
+    RADIOTAP_DBM_ANTNOISE = 6,
+    RADIOTAP_LOCK_QUALITY = 7,
+    RADIOTAP_TX_ATTENUATION = 8,
+    RADIOTAP_DB_TX_ATTENUATION = 9,
+    RADIOTAP_DBM_TX_POWER = 10,
+    RADIOTAP_ANTENNA = 11,
+    RADIOTAP_DB_ANTSIGNAL = 12,
+    RADIOTAP_DB_ANTNOISE = 13,
+    RADIOTAP_RX_FLAGS = 14,
+    RADIOTAP_TX_FLAGS = 15,
+    RADIOTAP_RTS_RETRIES = 16,
+    RADIOTAP_DATA_RETRIES = 17,
+    RADIOTAP_MCS = 19,
+    RADIOTAP_AMPDU_STATUS = 20,
+    RADIOTAP_VHT = 21,
+    RADIOTAP_TIMESTAMP = 22,
+    RADIOTAP_RADIOTAP_NAMESPACE = 29,
+    RADIOTAP_VENDOR_NAMESPACE = 30,
+    RADIOTAP_EXT = 31
+};
 
 typedef struct _ieee80211_header {
     uint8_t frame_control_version : 2;
