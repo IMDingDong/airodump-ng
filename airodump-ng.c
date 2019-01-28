@@ -23,7 +23,7 @@ probe_information probe_info[100];
 
 void usage() {
     printf("usage: ./airodump-ng <interface>\n");
-    printf("sample: ./airodump-ng -c 1 mon0\n\n");
+    printf("sample: ./airodump-ng mon0\n\n");
 }
 
 void print_mac(uint8_t * MAC_address) {
@@ -110,6 +110,7 @@ int main(int argc, char * argv[]) {
     int pwr = 0;
     int MB = 0;
     int rsn = 0;
+    int qos = 0;
 
     radiotap_header * radiotap;
     ieee80211_header * ieee80211;
@@ -129,8 +130,6 @@ int main(int argc, char * argv[]) {
         return -1;
     };
 
-    // display(beacon_count, probe_count, beacon_info, probe_info);    // initial screen
-
     thr_id = pthread_create(&p_thread, NULL, timer, (void *)argv[argc-1]);
 
     while (1) {
@@ -140,40 +139,95 @@ int main(int argc, char * argv[]) {
 
 	radiotap = (radiotap_header *)packet;
         ieee80211 = (ieee80211_header *)(packet + radiotap->length);
-/*
+
+        int present_count = 1;
+        for(uint32_t * pfcount = (uint32_t *)&(radiotap->present_flag); (*pfcount) & (1 << RADIOTAP_EXT); pfcount ++)
+            present_count ++;
+        uint8_t * flag_ptr = (uint8_t *)&(radiotap->present_flag) + (4 * present_count);
+
         for (uint32_t pflag = 0; pflag < 32; pflag++) {
             if (radiotap->present_flag & (1 << pflag)) {
                 switch(pflag) {
                     case RADIOTAP_TSFT:
+                        flag_ptr += 8;
+                        break;
                     case RADIOTAP_FLAGS:
+                        flag_ptr++;
+                        break;
                     case RADIOTAP_RATE:
+                        flag_ptr++;
+                        break;
                     case RADIOTAP_CHANNEL:
+                        flag_ptr += 4;
+                        break;
                     case RADIOTAP_FHSS:
+                        flag_ptr += 2;
+                        break;
                     case RADIOTAP_DBM_ANTSIGNAL:
+                        pwr = *(char *)flag_ptr;
+                        flag_ptr++;
+                        break;
                     case RADIOTAP_DBM_ANTNOISE:
+                        flag_ptr++;
+                        break;
                     case RADIOTAP_LOCK_QUALITY:
+                        flag_ptr += 2;
+                        break;
                     case RADIOTAP_TX_ATTENUATION:
+                        flag_ptr += 2;
+                        break;
                     case RADIOTAP_DB_TX_ATTENUATION:
+                        flag_ptr += 2;
+                        break;
                     case RADIOTAP_DBM_TX_POWER:
+                        flag_ptr++;
+                        break;
                     case RADIOTAP_ANTENNA:
+                        flag_ptr++;
+                        break;
                     case RADIOTAP_DB_ANTSIGNAL:
+                        flag_ptr++;
+                        break;
                     case RADIOTAP_DB_ANTNOISE:
+                        flag_ptr++;
+                        break;
                     case RADIOTAP_RX_FLAGS:
+                        flag_ptr += 2;
+                        break;
                     case RADIOTAP_TX_FLAGS:
+                        flag_ptr += 2;
+                        break;
                     case RADIOTAP_RTS_RETRIES:
+                        flag_ptr++;
+                        break;
                     case RADIOTAP_DATA_RETRIES:
+                        flag_ptr++;
+                        break;
                     case RADIOTAP_MCS:
+                        flag_ptr += 3;
+                        break;
                     case RADIOTAP_AMPDU_STATUS:
+                        flag_ptr += 8;
+                        break;
                     case RADIOTAP_VHT:
+                        flag_ptr += 12;
+                        break;
                     case RADIOTAP_TIMESTAMP:
+                        flag_ptr += 12;
+                        break;
                     case RADIOTAP_RADIOTAP_NAMESPACE:
+                        break;
                     case RADIOTAP_VENDOR_NAMESPACE:
+                        flag_ptr += 6;
+                        break;
                     case RADIOTAP_EXT:
                         break;
-                } 
+                    default:
+                        break;
+                }
             }
         }
-*/
+
         /* [BEACON FRAME] */
         if (ieee80211->frame_control_type == 0x00 && ieee80211->frame_control_subtype == 0x08) {
             for (check = 0, cnt = 0; cnt < beacon_count; cnt++) {
@@ -202,6 +256,8 @@ int main(int argc, char * argv[]) {
                     strncpy(beacon_info[beacon_count].CIPHER, " ", sizeof(beacon_info[beacon_count].CIPHER));
                     strncpy(beacon_info[beacon_count].AUTH, " ", sizeof(beacon_info[beacon_count].AUTH));
                 }
+
+                qos= 0;
 
                 while (tagged_size > 0) {
                     tag_data = (u_char *)tagged + sizeof(tagged_parameter);
@@ -248,7 +304,6 @@ int main(int argc, char * argv[]) {
                                 default:
                                     break;
                             }
-                            snprintf(beacon_info[beacon_count].MB, sizeof(beacon_info[beacon_count].MB), "%2d%1s%1s", MB, "e", ".");    //TODO qos -> e , preamble -> .
                             break;
 
                         case 0x03:    // DIRECT SEQUNCE CHANNEL SET
@@ -309,35 +364,20 @@ int main(int argc, char * argv[]) {
                             }
                             break;
 
-                        case 0xDD:
+                        case 0xDD:    // Vendor Specific
                             if (!memcmp(tag_data, "\x00\x50\xF2\x02\x01\x01", 6)) {
-                                // qos = 1;
+                                qos = 1;
                             }
                             break;
 
-/*
-                        case 0xDD:    // VENDOR SPECIFIC: MICROSOFT CORP
-                           switch (*(uint8_t *)((u_char *)tagged + sizeof(tagged_parameter) + 4)) {    // Type
-                               case 0x01:
-                               case 0x02:
-                                   strncpy(beacon_info[beacon_count].ENC, "WPA", 4);
-                                   break;
-
-                               case 0x04:
-                                   strncpy(beacon_info[beacon_count].ENC, "WPA2", 5);
-                                   break;
-
-                               default:
-                                   strncpy(beacon_info[beacon_count].ENC, "ZZZ", 4);
-                                   break;
-                           } 
-*/
                         deault:
                             break;
                     }
 		    tagged_size -= sizeof(tagged_parameter) + tagged->tag_length;
 		    tagged = (tagged_parameter *)(tag_data + tagged->tag_length);
                 }
+
+                snprintf(beacon_info[beacon_count].MB, sizeof(beacon_info[beacon_count].MB), "%2d%1s%1s", MB, qos ? "e" : "", fixed->capabilities_short_preamble ? "." : "");    //TODO qos -> e , preamble -> .
 
                 beacon_count++;
                 display(beacon_count, probe_count, beacon_info, probe_info);
@@ -351,8 +391,6 @@ int main(int argc, char * argv[]) {
                     check = 1;
                     probe_info[cnt].PWR = pwr;
                     probe_info[cnt].FRAMES++;
-
-                    // display(beacon_count, probe_count, beacon_info, probe_info);
                     break;
                 }
             }
