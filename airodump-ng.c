@@ -270,7 +270,7 @@ int main(int argc, char * argv[]) {
             }
             if (!check) {
                 pbeacon = beacon_info + beacon_count;
-                memcpy(beacon_info[beacon_count].BSSID, ieee80211->bssid_addr, sizeof(beacon_info[beacon_count].BSSID));
+                memcpy(pbeacon->BSSID, ieee80211->bssid_addr, sizeof(pbeacon->BSSID));
  
                 pbeacon->PWR = pwr;
                 pbeacon->BEACONS = 1;
@@ -568,7 +568,7 @@ int main(int argc, char * argv[]) {
         if (ieee80211->frame_control_type == 0x02) {
             for (cnt = 0; cnt < beacon_count; cnt++) {
                 pbeacon = beacon_info + cnt;
-                if (!memcmp(beacon_info[cnt].BSSID, ieee80211->bssid_addr, sizeof(beacon_info[cnt].BSSID))) {
+                if (!memcmp(pbeacon->BSSID, ieee80211->bssid_addr, sizeof(pbeacon->BSSID))) {
                     pbeacon->DATA++;
                 }
             }
