@@ -16,10 +16,12 @@ long long time_count = 0;
 int elapsed =  0;
 
 int beacon_count = 0;
-int probe_count = 0;
+int probe_req_count = 0;
+int probe_res_count = 0;
 
 beacon_information beacon_info[100];
-probe_information probe_info[100];
+probe_information probe_req_info[50];
+probe_information probe_res_info[50];
 
 beacon_information * pbeacon;
 probe_information * pprobe;
@@ -30,10 +32,15 @@ void usage() {
 }
 
 void print_mac(uint8_t * MAC_address) {
-    printf(" %02X:%02X:%02X:%02X:%02X:%02X ", MAC_address[0], MAC_address[1], MAC_address[2], MAC_address[3], MAC_address[4], MAC_address[5]);
+    if (!memcmp(MAC_address, "\x00\x00\x00\x00\x00\x00", 6)) {
+        printf(" (not associated)  ");
+    }
+    else {
+        printf(" %02X:%02X:%02X:%02X:%02X:%02X ", MAC_address[0], MAC_address[1], MAC_address[2], MAC_address[3], MAC_address[4], MAC_address[5]);
+    }
 }
 
-void display(int beacon_count, int probe_count, beacon_information * beacon, probe_information * probe) {
+void display(int beacon_count, int probe_req_count, int probe_res_count, beacon_information * beacon, probe_information * probe_req, probe_information * probe_res) {
     /* time */
     struct tm * date;
     const time_t t = time(NULL);
@@ -57,12 +64,20 @@ void display(int beacon_count, int probe_count, beacon_information * beacon, pro
 
     printf("\n BSSID              STATION            PWR   Rate    Lost    Frames  Probe\n\n");
 
-    for (int j = 0; j < probe_count; j++) {
-        pprobe = probe + j;
+    for (int j = 0; j < probe_req_count; j++) {
+        pprobe = probe_req + j;
         print_mac(pprobe->BSSID);
         print_mac(pprobe->STATION);
         printf(" %3d  %7s  %5d    %5d  %-33s\n", pprobe->PWR, pprobe->RATE, pprobe->LOST, pprobe->FRAMES, pprobe->PROBE);
     }
+
+    for (int j = 0; j < probe_res_count; j++) {
+        pprobe = probe_res + j;
+        print_mac(pprobe->BSSID);
+        print_mac(pprobe->STATION);
+        printf(" %3d  %7s  %5d    %5d  %-33s\n", pprobe->PWR, pprobe->RATE, pprobe->LOST, pprobe->FRAMES, pprobe->PROBE);
+    }
+
     printf("\n");
 }
 
@@ -83,7 +98,7 @@ void * timer(void * dev) {
             snprintf(cmd, sizeof(cmd), "iwconfig %s channel %d", (char *)dev, channel_array[channel_count]);
             system(cmd);
 
-            display(beacon_count, probe_count, beacon_info, probe_info);
+            display(beacon_count, probe_req_count, probe_res_count, beacon_info, probe_req_info, probe_res_info);
 
             if (channel_count <= 13) channel_count++;
             else channel_count = 0;
@@ -112,7 +127,7 @@ int main(int argc, char * argv[]) {
     int check = 0;
     int cnt = 0;
 
-    int pwr = 0;
+    int pwr = -1;
     uint8_t data_rate = 0;
     uint8_t ap_rate = 0;    // AP TO STATION
     uint8_t station_rate = 0;    // STATION TO AP
@@ -154,6 +169,7 @@ int main(int argc, char * argv[]) {
 
         /* [PARSING RADIOTAP] */
         int present_count = 1;
+        pwr = -1;
         for(uint32_t * pfcount = (uint32_t *)&(radiotap->present_flag); (*pfcount) & (1 << RADIOTAP_EXT); pfcount ++) present_count ++;
 
         uint8_t * flag_ptr = (uint8_t *)&(radiotap->present_flag) + (4 * present_count);
@@ -459,15 +475,15 @@ int main(int argc, char * argv[]) {
                 snprintf(pbeacon->MB, sizeof(pbeacon->MB), "%2d%1s%1s", MB, qos ? "e" : "", fixed->capabilities_short_preamble ? "." : "");    // qos -> e , preamble -> .
 
                 beacon_count++;
-                display(beacon_count, probe_count, beacon_info, probe_info);
+                display(beacon_count, probe_req_count, probe_res_count, beacon_info, probe_req_info, probe_res_info);
             }
         }
 
         /* [PROBE RESPONSE FRAME] */
         if (ieee80211->frame_control_type == 0x00 && ieee80211->frame_control_subtype == 0x05) {
-            for (check = 0, cnt = 0; cnt < probe_count; cnt++) {
-                pprobe = probe_info + cnt;
-                if (!memcmp(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID))) {
+            for (check = 0, cnt = 0; cnt < probe_res_count; cnt++) {
+                pprobe = probe_res_info + cnt;
+                if (!memcmp(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID)) && !memcmp(pprobe->STATION, ieee80211->destination_addr, sizeof(pprobe->STATION))) {
                     check = 1;
                     pprobe->PWR = pwr;
                     pprobe->FRAMES++;
@@ -477,7 +493,7 @@ int main(int argc, char * argv[]) {
                 }
             }
             if (!check) {
-                pprobe = probe_info + probe_count;
+                pprobe = probe_res_info + probe_res_count;
                 memcpy(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID));
                 memcpy(pprobe->STATION, ieee80211->destination_addr, sizeof(pprobe->STATION));
 
@@ -494,10 +510,6 @@ int main(int argc, char * argv[]) {
 
                 while (tagged_size > 0) {
                     switch(tagged->tag_number) {
-                        case 0x00:    // SSID
-                            strncpy(pprobe->PROBE, (u_char *)tagged + sizeof(tagged_parameter), tagged->tag_length);    // TODO incomplete
-                            break;
-
                         default:
                             break;
                     }
@@ -508,16 +520,16 @@ int main(int argc, char * argv[]) {
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
 
-                probe_count++;
-                display(beacon_count, probe_count, beacon_info, probe_info);
+                probe_res_count++;
+                display(beacon_count, probe_req_count, probe_res_count, beacon_info, probe_req_info, probe_res_info);
             }
         }
 
         /* [PROBE REQUEST FRAME] */
         if (ieee80211->frame_control_type == 0x00 && ieee80211->frame_control_subtype == 0x04) {
-            for (check = 0, cnt = 0; cnt < probe_count; cnt++) {
-                pprobe = probe_info + cnt;
-                if (!memcmp(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->STATION))) {
+            for (check = 0, cnt = 0; cnt < probe_req_count; cnt++) {
+                pprobe = probe_req_info + cnt;
+                if (!memcmp(pprobe->STATION, ieee80211->source_addr, sizeof(pprobe->STATION))) {
                     check = 1;
                     pprobe->PWR = pwr;
                     pprobe->FRAMES++;
@@ -527,9 +539,8 @@ int main(int argc, char * argv[]) {
                 }
             }
             if (!check) {
-                pprobe = probe_info + probe_count;
-                memcpy(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID));
-                memcpy(pprobe->STATION, ieee80211->destination_addr, sizeof(pprobe->STATION));
+                pprobe = probe_req_info + probe_req_count;
+                memcpy(pprobe->STATION, ieee80211->source_addr, sizeof(pprobe->STATION));
 
                 pprobe->PWR = pwr;
                 pprobe->FRAMES = 1;
@@ -545,7 +556,7 @@ int main(int argc, char * argv[]) {
                 while (tagged_size > 0) {
                     switch(tagged->tag_number) {
                         case 0x00:    // SSID
-                            strncpy(pprobe->PROBE, (u_char *)tagged + sizeof(tagged_parameter), tagged->tag_length);    // TODO incomplete
+                            strncpy(pprobe->PROBE, (u_char *)tagged + sizeof(tagged_parameter), tagged->tag_length);
                             break;
 
                         default:
@@ -558,8 +569,8 @@ int main(int argc, char * argv[]) {
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
 
-                probe_count++;
-                display(beacon_count, probe_count, beacon_info, probe_info);
+                probe_req_count++;
+                display(beacon_count, probe_req_count, probe_res_count, beacon_info, probe_req_info, probe_res_info);
             }
         }
 
