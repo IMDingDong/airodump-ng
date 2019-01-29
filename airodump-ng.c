@@ -21,6 +21,9 @@ int probe_count = 0;
 beacon_information beacon_info[100];
 probe_information probe_info[100];
 
+beacon_information * pbeacon;
+probe_information * pprobe;
+
 void usage() {
     printf("usage: ./airodump-ng <interface>\n");
     printf("sample: ./airodump-ng mon0\n\n");
@@ -30,7 +33,7 @@ void print_mac(uint8_t * MAC_address) {
     printf(" %02X:%02X:%02X:%02X:%02X:%02X ", MAC_address[0], MAC_address[1], MAC_address[2], MAC_address[3], MAC_address[4], MAC_address[5]);
 }
 
-void display(int beacon_count, int probe_count, beacon_information * pbeacon, probe_information * pprobe) {
+void display(int beacon_count, int probe_count, beacon_information * beacon, probe_information * probe) {
     /* time */
     struct tm * date;
     const time_t t = time(NULL);
@@ -45,18 +48,20 @@ void display(int beacon_count, int probe_count, beacon_information * pbeacon, pr
     printf("\n\n BSSID              PWR  Beacons    #Data, #/s  CH  MB   ENC  CIPHER AUTH ESSID\n\n");
 
     for (int i = 0; i < beacon_count; i++) {
-        print_mac(pbeacon[i].BSSID);
+        pbeacon = beacon + i;
+        print_mac(pbeacon->BSSID);
         printf(" %3d     %4d     %4d  %3d  %2d  %-4s %-4s %-4s   %-3s  %-33s\n", 
-            pbeacon[i].PWR, pbeacon[i].BEACONS, pbeacon[i].DATA, pbeacon[i].S, pbeacon[i].CH, 
-            pbeacon[i].MB, pbeacon[i].ENC, pbeacon[i].CIPHER, pbeacon[i].AUTH, pbeacon[i].ESSID);
+            pbeacon->PWR, pbeacon->BEACONS, pbeacon->DATA, pbeacon->S, pbeacon->CH, 
+            pbeacon->MB, pbeacon->ENC, pbeacon->CIPHER, pbeacon->AUTH, pbeacon->ESSID);
     }
 
     printf("\n BSSID              STATION            PWR   Rate    Lost    Frames  Probe\n\n");
 
     for (int j = 0; j < probe_count; j++) {
-        print_mac(pprobe[j].BSSID);
-        print_mac(pprobe[j].STATION);
-        printf(" %3d  %7s  %5d    %5d  %-33s\n", pprobe[j].PWR, pprobe[j].RATE, pprobe[j].LOST, pprobe[j].FRAMES, pprobe[j].PROBE);
+        pprobe = probe + j;
+        print_mac(pprobe->BSSID);
+        print_mac(pprobe->STATION);
+        printf(" %3d  %7s  %5d    %5d  %-33s\n", pprobe->PWR, pprobe->RATE, pprobe->LOST, pprobe->FRAMES, pprobe->PROBE);
     }
     printf("\n");
 }
@@ -255,20 +260,22 @@ int main(int argc, char * argv[]) {
         /* [BEACON FRAME] */
         if (ieee80211->frame_control_type == 0x00 && ieee80211->frame_control_subtype == 0x08) {
             for (check = 0, cnt = 0; cnt < beacon_count; cnt++) {
-                if (!memcmp(beacon_info[cnt].BSSID, ieee80211->bssid_addr, sizeof(beacon_info[cnt].BSSID))) {
+                pbeacon = beacon_info + cnt;
+                if (!memcmp(pbeacon->BSSID, ieee80211->bssid_addr, sizeof(pbeacon->BSSID))) {
                     check = 1;
-                    beacon_info[cnt].PWR = pwr;
-                    beacon_info[cnt].BEACONS++;
+                    pbeacon->PWR = pwr;
+                    pbeacon->BEACONS++;
                     break;
                 }
             }
             if (!check) {
+                pbeacon = beacon_info + beacon_count;
                 memcpy(beacon_info[beacon_count].BSSID, ieee80211->bssid_addr, sizeof(beacon_info[beacon_count].BSSID));
  
-                beacon_info[beacon_count].PWR = pwr;
-                beacon_info[beacon_count].BEACONS = 1;
-                beacon_info[beacon_count].DATA = data_count;
-                beacon_info[beacon_count].S = s_num;
+                pbeacon->PWR = pwr;
+                pbeacon->BEACONS = 1;
+                pbeacon->DATA = data_count;
+                pbeacon->S = s_num;
 
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
@@ -276,9 +283,9 @@ int main(int argc, char * argv[]) {
                 tagged_size = header->caplen - radiotap->length - sizeof(ieee80211_header) - sizeof(fixed_parameter);
 
                 if (fixed->capabilities_privacy == 0) {
-                    strncpy(beacon_info[beacon_count].ENC, "OPN", sizeof(beacon_info[beacon_count].ENC));
-                    strncpy(beacon_info[beacon_count].CIPHER, " ", sizeof(beacon_info[beacon_count].CIPHER));
-                    strncpy(beacon_info[beacon_count].AUTH, " ", sizeof(beacon_info[beacon_count].AUTH));
+                    strncpy(pbeacon->ENC, "OPN", sizeof(pbeacon->ENC));
+                    strncpy(pbeacon->CIPHER, " ", sizeof(pbeacon->CIPHER));
+                    strncpy(pbeacon->AUTH, " ", sizeof(pbeacon->AUTH));
                 }
 
                 qos= 0;
@@ -289,10 +296,10 @@ int main(int argc, char * argv[]) {
                     switch(tagged->tag_number) {
                         case 0x00:    // SSID
                             if (*(uint8_t *)tag_data != 0x00 && tagged->tag_length != 0) {
-                                strncpy(beacon_info[beacon_count].ESSID, tag_data, tagged->tag_length);
+                                strncpy(pbeacon->ESSID, tag_data, tagged->tag_length);
                             }
                             else {
-                                snprintf(beacon_info[beacon_count].ESSID, sizeof(beacon_info[beacon_count]), "<length:%3d>", tagged->tag_length);
+                                snprintf(pbeacon->ESSID, sizeof(pbeacon->ESSID), "<length:%3d>", tagged->tag_length);
                             }
                             break;
 
@@ -337,53 +344,53 @@ int main(int argc, char * argv[]) {
                             break;
 
                         case 0x03:    // DIRECT SEQUNCE CHANNEL SET
-                            beacon_info[beacon_count].CH = *(uint8_t *)(tag_data);
+                            pbeacon->CH = *(uint8_t *)(tag_data);
                             break;
 
                         case 0x30:    // RSN INFORMATION ELEMENT
                             wpa2_check = 1;
-                            strncpy(beacon_info[beacon_count].ENC, "WPA2", 5);
+                            strncpy(pbeacon->ENC, "WPA2", 5);
 
                             rsn = 5;
                             rsn += 2 + *(uint16_t *)(tag_data + rsn + 1) * 4;
                             switch (*(uint8_t *)(tag_data + rsn)) {    // Pairwise Cipher Suite Type
                                 case 0x01:    // WEP 40
-                                    strncpy(beacon_info[beacon_count].CIPHER, "WEP", 4);
+                                    strncpy(pbeacon->CIPHER, "WEP", 4);
                                     break;
 
                                 case 0x02:
-                                    strncpy(beacon_info[beacon_count].CIPHER, "TKIP", 5);
+                                    strncpy(pbeacon->CIPHER, "TKIP", 5);
                                     break;
 
                                 case 0x03:
-                                    strncpy(beacon_info[beacon_count].CIPHER, "WARP", 5);
+                                    strncpy(pbeacon->CIPHER, "WARP", 5);
                                     break;
 
                                 case 0x04:
-                                    strncpy(beacon_info[beacon_count].CIPHER, "CCMP", 5);
+                                    strncpy(pbeacon->CIPHER, "CCMP", 5);
                                     break;
 
                                 case 0x05:    // WEP104
-                                    strncpy(beacon_info[beacon_count].CIPHER, "WEP", 7);
+                                    strncpy(pbeacon->CIPHER, "WEP", 7);
                                     break;
 
                                 default:
-                                    strncpy(beacon_info[beacon_count].CIPHER, " ", 2);
+                                    strncpy(pbeacon->CIPHER, " ", 2);
                                     break;
                             }
 
                             rsn += 2 + *(uint16_t *)(tag_data + rsn + 1) * 4;
                             switch(*(uint8_t *)(tag_data + rsn)) {    // Auth Key Management Type
                                 case 0x01:
-                                    strncpy(beacon_info[beacon_count].AUTH, "MGT", 4); 
+                                    strncpy(pbeacon->AUTH, "MGT", 4); 
                                     break;
 
                                 case 0x02:
-                                    strncpy(beacon_info[beacon_count].AUTH, "PSK", 4);
+                                    strncpy(pbeacon->AUTH, "PSK", 4);
                                     break;
 
                                 default:
-                                    strncpy(beacon_info[beacon_count].AUTH, " ", 2); 
+                                    strncpy(pbeacon->AUTH, " ", 2); 
                                     break;
                             }
                             break;
@@ -395,48 +402,48 @@ int main(int argc, char * argv[]) {
                             }
 
                             if (*(uint8_t *)(tag_data + vendor) == 1 && !memcmp(tag_data, "\x00\x50\xF2\x01\x01\x00", 6) && !wpa2_check) {
-                                strncpy(beacon_info[beacon_count].ENC, "WPA", 4);
+                                strncpy(pbeacon->ENC, "WPA", 4);
 
                                 vendor += 6;
                                 vendor += 2 + *(uint16_t *)(tag_data + vendor + 1) * 4;
                                 switch(*(uint8_t *)(tag_data + vendor)) {
                                     case 0x01:    // WEP 40
-                                        strncpy(beacon_info[beacon_count].CIPHER, "WEP", 4);
+                                        strncpy(pbeacon->CIPHER, "WEP", 4);
                                         break;
 
                                     case 0x02:
-                                        strncpy(beacon_info[beacon_count].CIPHER, "TKIP", 5);
+                                        strncpy(pbeacon->CIPHER, "TKIP", 5);
                                         break;
 
                                     case 0x03:
-                                        strncpy(beacon_info[beacon_count].CIPHER, "WARP", 5);
+                                        strncpy(pbeacon->CIPHER, "WARP", 5);
                                         break;
 
                                     case 0x04:
-                                        strncpy(beacon_info[beacon_count].CIPHER, "CCMP", 5);
+                                        strncpy(pbeacon->CIPHER, "CCMP", 5);
                                         break;
 
                                     case 0x05:    // WEP104
-                                        strncpy(beacon_info[beacon_count].CIPHER, "WEP", 7);
+                                        strncpy(pbeacon->CIPHER, "WEP", 7);
                                         break;
 
                                     default:
-                                        strncpy(beacon_info[beacon_count].CIPHER, " ", 2);
+                                        strncpy(pbeacon->CIPHER, " ", 2);
                                         break;
                                 }
 
                                 vendor += 2 + *(uint16_t *)(tag_data + vendor + 1) * 4;
                                 switch(*(uint8_t *)(tag_data + vendor)) {
                                     case 0x01:
-                                        strncpy(beacon_info[beacon_count].AUTH, "MGT", 4);
+                                        strncpy(pbeacon->AUTH, "MGT", 4);
                                         break;
 
                                     case 0x02:
-                                        strncpy(beacon_info[beacon_count].AUTH, "PSK", 4);
+                                        strncpy(pbeacon->AUTH, "PSK", 4);
                                         break;
 
                                     default:
-                                        strncpy(beacon_info[beacon_count].AUTH, " ", 2);
+                                        strncpy(pbeacon->AUTH, " ", 2);
                                         break;
                                 }
                             }
@@ -449,7 +456,7 @@ int main(int argc, char * argv[]) {
 		    tagged = (tagged_parameter *)(tag_data + tagged->tag_length);
                 }
 
-                snprintf(beacon_info[beacon_count].MB, sizeof(beacon_info[beacon_count].MB), "%2d%1s%1s", MB, qos ? "e" : "", fixed->capabilities_short_preamble ? "." : "");    // qos -> e , preamble -> .
+                snprintf(pbeacon->MB, sizeof(pbeacon->MB), "%2d%1s%1s", MB, qos ? "e" : "", fixed->capabilities_short_preamble ? "." : "");    // qos -> e , preamble -> .
 
                 beacon_count++;
                 display(beacon_count, probe_count, beacon_info, probe_info);
@@ -459,24 +466,26 @@ int main(int argc, char * argv[]) {
         /* [PROBE RESPONSE FRAME] */
         if (ieee80211->frame_control_type == 0x00 && ieee80211->frame_control_subtype == 0x05) {
             for (check = 0, cnt = 0; cnt < probe_count; cnt++) {
-                if (!memcmp(probe_info[cnt].BSSID, ieee80211->bssid_addr, sizeof(probe_info[cnt].BSSID))) {
+                pprobe = probe_info + cnt;
+                if (!memcmp(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID))) {
                     check = 1;
-                    probe_info[cnt].PWR = pwr;
-                    probe_info[cnt].FRAMES++;
+                    pprobe->PWR = pwr;
+                    pprobe->FRAMES++;
 
-                    snprintf(probe_info[probe_count].RATE, sizeof(probe_info[probe_count].RATE), "%2d%1s-%2d%1s", data_rate, "e", station_rate, "e");
+                    snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", data_rate, "e", station_rate, "e");
                     break;
                 }
             }
             if (!check) {
-                memcpy(probe_info[probe_count].BSSID, ieee80211->bssid_addr, sizeof(probe_info[probe_count].BSSID));
-                memcpy(probe_info[probe_count].STATION, ieee80211->destination_addr, sizeof(probe_info[probe_count].STATION));
+                pprobe = probe_info + probe_count;
+                memcpy(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID));
+                memcpy(pprobe->STATION, ieee80211->destination_addr, sizeof(pprobe->STATION));
 
-                probe_info[probe_count].PWR = pwr;
-                probe_info[probe_count].FRAMES = 1;
+                pprobe->PWR = pwr;
+                pprobe->FRAMES = 1;
 
-                probe_info[probe_count].LOST = 0;    // TODO incomplete                
-                snprintf(probe_info[probe_count].RATE, sizeof(probe_info[probe_count].RATE), "%2d%1s-%2d%1s", data_rate, "e", station_rate, "e");
+                pprobe->LOST = 0;    // TODO incomplete                
+                snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", data_rate, "e", station_rate, "e");
 
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
@@ -486,7 +495,7 @@ int main(int argc, char * argv[]) {
                 while (tagged_size > 0) {
                     switch(tagged->tag_number) {
                         case 0x00:    // SSID
-                            strncpy(probe_info[probe_count].PROBE, (u_char *)tagged + sizeof(tagged_parameter), tagged->tag_length);    // TODO incomplete
+                            strncpy(pprobe->PROBE, (u_char *)tagged + sizeof(tagged_parameter), tagged->tag_length);    // TODO incomplete
                             break;
 
                         default:
@@ -507,24 +516,26 @@ int main(int argc, char * argv[]) {
         /* [PROBE REQUEST FRAME] */
         if (ieee80211->frame_control_type == 0x00 && ieee80211->frame_control_subtype == 0x04) {
             for (check = 0, cnt = 0; cnt < probe_count; cnt++) {
-                if (!memcmp(probe_info[cnt].BSSID, ieee80211->bssid_addr, sizeof(probe_info[cnt].STATION))) {
+                pprobe = probe_info + cnt;
+                if (!memcmp(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->STATION))) {
                     check = 1;
-                    probe_info[cnt].PWR = pwr;
-                    probe_info[cnt].FRAMES++;
+                    pprobe->PWR = pwr;
+                    pprobe->FRAMES++;
 
-                    snprintf(probe_info[probe_count].RATE, sizeof(probe_info[probe_count].RATE), "%2d%1s-%2d%1s", ap_rate, "e", data_rate, "e");
+                    snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", ap_rate, "e", data_rate, "e");
                     break;
                 }
             }
             if (!check) {
-                memcpy(probe_info[probe_count].BSSID, ieee80211->bssid_addr, sizeof(probe_info[probe_count].BSSID));
-                memcpy(probe_info[probe_count].STATION, ieee80211->destination_addr, sizeof(probe_info[probe_count].STATION));
+                pprobe = probe_info + probe_count;
+                memcpy(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID));
+                memcpy(pprobe->STATION, ieee80211->destination_addr, sizeof(pprobe->STATION));
 
-                probe_info[probe_count].PWR = pwr;
-                probe_info[probe_count].FRAMES = 1;
+                pprobe->PWR = pwr;
+                pprobe->FRAMES = 1;
 
-                probe_info[probe_count].LOST = 0;
-                snprintf(probe_info[probe_count].RATE, sizeof(probe_info[probe_count].RATE), "%2d%1s-%2d%1s", ap_rate, "e", data_rate, "e");
+                pprobe->LOST = 0;
+                snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", ap_rate, "e", data_rate, "e");
 
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
@@ -534,7 +545,7 @@ int main(int argc, char * argv[]) {
                 while (tagged_size > 0) {
                     switch(tagged->tag_number) {
                         case 0x00:    // SSID
-                            strncpy(probe_info[probe_count].PROBE, (u_char *)tagged + sizeof(tagged_parameter), tagged->tag_length);    // TODO incomplete
+                            strncpy(pprobe->PROBE, (u_char *)tagged + sizeof(tagged_parameter), tagged->tag_length);    // TODO incomplete
                             break;
 
                         default:
@@ -556,8 +567,9 @@ int main(int argc, char * argv[]) {
         /* [DATA FRAMES] */
         if (ieee80211->frame_control_type == 0x02) {
             for (cnt = 0; cnt < beacon_count; cnt++) {
+                pbeacon = beacon_info + cnt;
                 if (!memcmp(beacon_info[cnt].BSSID, ieee80211->bssid_addr, sizeof(beacon_info[cnt].BSSID))) {
-                    beacon_info[cnt].DATA++;
+                    pbeacon->DATA++;
                 }
             }
         }
