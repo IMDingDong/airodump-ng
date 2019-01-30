@@ -490,7 +490,7 @@ int main(int argc, char * argv[]) {
                 while (tagged_size > 0) {
                     switch(tagged->tag_number) {
                         case 0x00:    // SSID
-                            strncpy(pprobe->PROBE, (u_char *)tagged + sizeof(tagged_parameter), tagged->tag_length);
+                            // strncpy(pprobe->PROBE, (u_char *)tagged + sizeof(tagged_parameter), tagged->tag_length);
                             break;
 
                         default:
@@ -529,15 +529,16 @@ int main(int argc, char * argv[]) {
                 }
             }
 
+            for (cnt = 0; cnt < beacon_count; cnt++) {
+                pbeacon = beacon_info + cnt;
+                if (!memcmp(pbeacon->BSSID, ieee80211->bssid_addr, sizeof(pbeacon->BSSID))) {
+                    pbeacon->PWR = pwr;
+                    pbeacon->DATA++;
+                }
+            }
+
             if (memcmp(ieee80211->destination_addr, "\xFF\xFF\xFF\xFF\xFF\xFF", sizeof(pprobe->STATION))) {
                 if (from_ds == 1) {
-                    for (cnt = 0; cnt < beacon_count; cnt++) {
-                        pbeacon = beacon_info + cnt;
-                        if (!memcmp(pbeacon->BSSID, ieee80211->bssid_addr, sizeof(pbeacon->BSSID))) {
-                            pbeacon->PWR = pwr;
-                            pbeacon->DATA++;
-                        }
-                    }
                     for (cnt = 0; cnt < probe_res_count; cnt++) {
                         pprobe = probe_res_info + cnt;
                         // if (!memcmp(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID))) {
@@ -553,7 +554,7 @@ int main(int argc, char * argv[]) {
                 if (to_ds == 1) {
                     for (cnt = 0; cnt < probe_req_count; cnt++) {
                         pprobe = probe_req_info + cnt;
-                        // if (!memcmp(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID))) {
+                        if (!memcmp(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID))) {
                         pprobe->AP_RATE = data_rate;
                         if (ieee80211->frame_control_subtype == 0x08) {
                             pprobe->AP_QOS = 1;
@@ -565,7 +566,7 @@ int main(int argc, char * argv[]) {
                             pprobe->LOST += sequence;
                         }
                         probe_seq[cnt] = ieee80211->sequence_number;
-                        // }
+                        }
                     }
                 }
             } 
