@@ -69,6 +69,17 @@ typedef struct _ieee80211_header {
     uint16_t sequence_number : 12;
 } ieee80211_header;
 
+enum ieee80211_flags {
+    TO_DS = 0,
+    FROM_DS = 1,
+    MORE_FRAGEMENTS = 2,
+    RETRY = 3,
+    PWR_MAG = 4,
+    MORE_DATA = 5,
+    PROTECTED_FLAG = 7,
+    ORDER_FLAG = 8
+};
+
 typedef struct _fixed_parameter {
     uint64_t timestamp;
     uint16_t beacon_interval;
@@ -99,7 +110,6 @@ typedef struct _beacon_information {
     int PWR;
     int BEACONS;
     int DATA;
-    int S;
     uint8_t CH;
     char MB[5];
     char ENC[5];

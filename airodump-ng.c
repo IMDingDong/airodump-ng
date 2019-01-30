@@ -47,19 +47,17 @@ void display(int beacon_count, int probe_req_count, int probe_res_count, beacon_
     date = localtime(&t);
 
     printf("\e[2J\e[H\e[?25l");    // \e[2J : clear entire screen, \e[H : move cursor to upper left corner, \e[?25l : hide cursor
-    printf("\n CH %2d", channel_array[channel_count]);    // TODO incomplete
-    printf(" ][ Elapsed: %d s", elapsed);    // TODO incomplete
+    printf("\n CH %2d", channel_array[channel_count]);
+    printf(" ][ Elapsed: %d s", elapsed);
     printf(" ][ %4d-%02d-%02d %02d:%02d", date->tm_year + 1900, date->tm_mon + 1, date->tm_mday, date->tm_hour, date->tm_min);
-    // printf(" ][ WPA handshake: %18s");
 
-    printf("\n\n BSSID              PWR  Beacons    #Data, #/s  CH  MB   ENC  CIPHER AUTH ESSID\n\n");
+    printf("\n\n BSSID              PWR  Beacons    #Data, CH  MB   ENC  CIPHER AUTH ESSID\n\n");
 
     for (int i = 0; i < beacon_count; i++) {
         pbeacon = beacon + i;
         print_mac(pbeacon->BSSID);
-        printf(" %3d     %4d     %4d  %3d  %2d  %-4s %-4s %-4s   %-3s  %-33s\n", 
-            pbeacon->PWR, pbeacon->BEACONS, pbeacon->DATA, pbeacon->S, pbeacon->CH, 
-            pbeacon->MB, pbeacon->ENC, pbeacon->CIPHER, pbeacon->AUTH, pbeacon->ESSID);
+        printf(" %3d     %4d     %4d  %2d  %-4s %-4s %-4s   %-3s  %-33s\n", 
+            pbeacon->PWR, pbeacon->BEACONS, pbeacon->DATA, pbeacon->CH, pbeacon->MB, pbeacon->ENC, pbeacon->CIPHER, pbeacon->AUTH, pbeacon->ESSID);
     }
 
     printf("\n BSSID              STATION            PWR   Rate    Lost    Frames  Probe\n\n");
@@ -95,6 +93,8 @@ void * timer(void * dev) {
         if (tickCount() - time_count > 1000) {    // Every Second
             time_count = tickCount();
             elapsed++;
+
+            /* channel hopping */
             snprintf(cmd, sizeof(cmd), "iwconfig %s channel %d", (char *)dev, channel_array[channel_count]);
             system(cmd);
 
@@ -116,28 +116,24 @@ int main(int argc, char * argv[]) {
 
     pthread_t p_thread;
     int thr_id;
-    int status;
 
-    int data_count = 0;
-
-    int s_num = 0;    // TODO 10 sec packet count
     int tagged_size = 0;
     u_char * tag_data;
 
     int check = 0;
     int cnt = 0;
-
     int pwr = -1;
+    int data_count = 0;
+    int MB = 0;
     uint8_t data_rate = 0;
     uint8_t ap_rate = 0;    // AP TO STATION
     uint8_t station_rate = 0;    // STATION TO AP
-
-    int MB = 0;
     int rsn = 0;
     int vendor = 0;
     int qos = 0;
-
     int wpa2_check = 0;
+    uint16_t sequence = 0;
+    uint16_t probe_seq[50];
 
     radiotap_header * radiotap;
     ieee80211_header * ieee80211;
@@ -291,7 +287,6 @@ int main(int argc, char * argv[]) {
                 pbeacon->PWR = pwr;
                 pbeacon->BEACONS = 1;
                 pbeacon->DATA = data_count;
-                pbeacon->S = s_num;
 
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
@@ -300,8 +295,10 @@ int main(int argc, char * argv[]) {
 
                 if (fixed->capabilities_privacy == 0) {
                     strncpy(pbeacon->ENC, "OPN", sizeof(pbeacon->ENC));
-                    strncpy(pbeacon->CIPHER, " ", sizeof(pbeacon->CIPHER));
-                    strncpy(pbeacon->AUTH, " ", sizeof(pbeacon->AUTH));
+                }
+                else if (fixed->capabilities_privacy == 1) {
+                    strncpy(pbeacon->ENC, "WEP", sizeof(pbeacon->ENC));
+                    strncpy(pbeacon->CIPHER, "WEP", sizeof(pbeacon->ENC));
                 }
 
                 qos= 0;
@@ -325,35 +322,27 @@ int main(int argc, char * argv[]) {
                                 case 0x81:
                                     MB = 1;
                                     break;
-
                                 case 0x84:
                                     MB = 2;
                                     break;
-
                                 case 0x8B:
                                     MB = 5;
                                     break;
-
                                 case 0x96:
                                     MB = 11;
                                     break;
-
                                 case 0x24:
                                     MB = 18;
                                     break;
-
                                 case 0x30:
                                     MB = 24;
                                     break;
-
                                 case 0x48:
                                     MB = 36;
                                     break;
-
                                 case 0x6C:
                                     MB = 54;
                                     break;
-
                                 default:
                                     break;
                             }
@@ -373,23 +362,18 @@ int main(int argc, char * argv[]) {
                                 case 0x01:    // WEP 40
                                     strncpy(pbeacon->CIPHER, "WEP", 4);
                                     break;
-
                                 case 0x02:
                                     strncpy(pbeacon->CIPHER, "TKIP", 5);
                                     break;
-
                                 case 0x03:
                                     strncpy(pbeacon->CIPHER, "WARP", 5);
                                     break;
-
                                 case 0x04:
                                     strncpy(pbeacon->CIPHER, "CCMP", 5);
                                     break;
-
                                 case 0x05:    // WEP104
                                     strncpy(pbeacon->CIPHER, "WEP", 7);
                                     break;
-
                                 default:
                                     strncpy(pbeacon->CIPHER, " ", 2);
                                     break;
@@ -400,18 +384,16 @@ int main(int argc, char * argv[]) {
                                 case 0x01:
                                     strncpy(pbeacon->AUTH, "MGT", 4); 
                                     break;
-
                                 case 0x02:
                                     strncpy(pbeacon->AUTH, "PSK", 4);
                                     break;
-
                                 default:
                                     strncpy(pbeacon->AUTH, " ", 2); 
                                     break;
                             }
                             break;
 
-                        case 0xDD:    // Vendor Specific
+                        case 0xDD:    // VENDOR SPECIFIC
                             vendor = 3;
                             if (*(uint8_t *)(tag_data + vendor) == 2 && !memcmp(tag_data, "\x00\x50\xF2\x02\x01\x01", 6)) {
                                 qos = 1;
@@ -420,29 +402,23 @@ int main(int argc, char * argv[]) {
                             if (*(uint8_t *)(tag_data + vendor) == 1 && !memcmp(tag_data, "\x00\x50\xF2\x01\x01\x00", 6) && !wpa2_check) {
                                 strncpy(pbeacon->ENC, "WPA", 4);
 
-                                vendor += 6;
-                                vendor += 2 + *(uint16_t *)(tag_data + vendor + 1) * 4;
+                                vendor += 8 + *(uint16_t *)(tag_data + vendor + 1) * 4;
                                 switch(*(uint8_t *)(tag_data + vendor)) {
                                     case 0x01:    // WEP 40
                                         strncpy(pbeacon->CIPHER, "WEP", 4);
                                         break;
-
                                     case 0x02:
                                         strncpy(pbeacon->CIPHER, "TKIP", 5);
                                         break;
-
                                     case 0x03:
                                         strncpy(pbeacon->CIPHER, "WARP", 5);
                                         break;
-
                                     case 0x04:
                                         strncpy(pbeacon->CIPHER, "CCMP", 5);
                                         break;
-
                                     case 0x05:    // WEP104
                                         strncpy(pbeacon->CIPHER, "WEP", 7);
                                         break;
-
                                     default:
                                         strncpy(pbeacon->CIPHER, " ", 2);
                                         break;
@@ -453,11 +429,9 @@ int main(int argc, char * argv[]) {
                                     case 0x01:
                                         strncpy(pbeacon->AUTH, "MGT", 4);
                                         break;
-
                                     case 0x02:
                                         strncpy(pbeacon->AUTH, "PSK", 4);
                                         break;
-
                                     default:
                                         strncpy(pbeacon->AUTH, " ", 2);
                                         break;
@@ -499,8 +473,8 @@ int main(int argc, char * argv[]) {
 
                 pprobe->PWR = pwr;
                 pprobe->FRAMES = 1;
+                pprobe->LOST = 0;
 
-                pprobe->LOST = 0;    // TODO incomplete                
                 snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", data_rate, "e", station_rate, "e");
 
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
@@ -532,6 +506,7 @@ int main(int argc, char * argv[]) {
                 if (!memcmp(pprobe->STATION, ieee80211->source_addr, sizeof(pprobe->STATION))) {
                     check = 1;
                     pprobe->PWR = pwr;
+
                     pprobe->FRAMES++;
 
                     snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", ap_rate, "e", data_rate, "e");
@@ -544,8 +519,9 @@ int main(int argc, char * argv[]) {
 
                 pprobe->PWR = pwr;
                 pprobe->FRAMES = 1;
-
                 pprobe->LOST = 0;
+                probe_seq[probe_req_count] = ieee80211->sequence_number;
+                
                 snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", ap_rate, "e", data_rate, "e");
 
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
@@ -577,10 +553,43 @@ int main(int argc, char * argv[]) {
 
         /* [DATA FRAMES] */
         if (ieee80211->frame_control_type == 0x02) {
-            for (cnt = 0; cnt < beacon_count; cnt++) {
-                pbeacon = beacon_info + cnt;
-                if (!memcmp(pbeacon->BSSID, ieee80211->bssid_addr, sizeof(pbeacon->BSSID))) {
-                    pbeacon->DATA++;
+            uint8_t to_ds = 0;
+            uint8_t from_ds = 0;
+            
+            for (uint8_t pflag = 0; pflag < 8; pflag++) {
+                if (ieee80211->flags & (1 << pflag)) {    // bit mask
+                    switch (pflag) {
+                        case TO_DS:
+                            to_ds = 1; 
+                            break;
+                        case FROM_DS:
+                            from_ds = 1;
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
+
+            if (to_ds == 0 && from_ds == 1) {
+                for (cnt = 0; cnt < beacon_count; cnt++) {
+                    pbeacon = beacon_info + cnt;
+                    if (!memcmp(pbeacon->BSSID, ieee80211->bssid_addr, sizeof(pbeacon->BSSID))) {
+                        pbeacon->PWR = pwr;
+                        pbeacon->DATA++;
+                    }
+                }
+            }
+
+            if (to_ds == 1 && from_ds == 0) {
+                for (cnt = 0; cnt < probe_req_count; cnt++) {
+                    pprobe = probe_req_info + cnt;
+ 
+                    sequence = ieee80211->sequence_number - probe_seq[probe_req_count] - 1;
+                    if (sequence > 0 && sequence < 1000) {
+                        pprobe->LOST += sequence;
+                    }
+                    probe_seq[probe_req_count] = ieee80211->sequence_number;
                 }
             }
         }
