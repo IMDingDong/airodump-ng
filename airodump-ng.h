@@ -126,6 +126,10 @@ typedef struct _probe_information {
     int LOST;
     int FRAMES;
     char PROBE[33];
+    int AP_RATE;
+    int AP_QOS;
+    int STATION_RATE;
+    int STATION_QOS;
 } probe_information;
 
 #pragma pack(pop)

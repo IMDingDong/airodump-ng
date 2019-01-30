@@ -126,8 +126,9 @@ int main(int argc, char * argv[]) {
     int data_count = 0;
     int MB = 0;
     uint8_t data_rate = 0;
-    uint8_t ap_rate = 0;    // AP TO STATION
-    uint8_t station_rate = 0;    // STATION TO AP
+    uint8_t ap_rate = 0;
+    int ap_qos = 0;
+    uint8_t station_rate = 0;
     int rsn = 0;
     int vendor = 0;
     int qos = 0;
@@ -180,22 +181,7 @@ int main(int argc, char * argv[]) {
                         flag_ptr++;
                         break;
                     case RADIOTAP_RATE:
-                        switch (*(uint8_t *)flag_ptr) {
-                            case 0x02:
-                                data_rate = 1;
-                                break;
-                            case 0x0c:
-                                data_rate = 6;
-                                break;
-                            case 0x30:
-                                data_rate = 24;
-                                break;
-                            case 0x6c:
-                                data_rate = 54;
-                                break;
-                            default:
-                                break;
-                        }
+                        data_rate = *(uint8_t *)flag_ptr / 2;
                         flag_ptr++;
                         break;
                     case RADIOTAP_CHANNEL:
@@ -318,34 +304,7 @@ int main(int argc, char * argv[]) {
 
                         case 0x01:    // SUPORTED DATA RATES
                         case 0x32:    // EXTENDED SUPPORTED RATES
-                            switch (*(uint8_t *)(tag_data + tagged->tag_length -1)) {
-                                case 0x81:
-                                    MB = 1;
-                                    break;
-                                case 0x84:
-                                    MB = 2;
-                                    break;
-                                case 0x8B:
-                                    MB = 5;
-                                    break;
-                                case 0x96:
-                                    MB = 11;
-                                    break;
-                                case 0x24:
-                                    MB = 18;
-                                    break;
-                                case 0x30:
-                                    MB = 24;
-                                    break;
-                                case 0x48:
-                                    MB = 36;
-                                    break;
-                                case 0x6C:
-                                    MB = 54;
-                                    break;
-                                default:
-                                    break;
-                            }
+                            MB = (MB < *(uint8_t *)(tag_data + tagged->tag_length - 1)/2) ? *(uint8_t *)(tag_data + tagged->tag_length - 1)/2 : MB;
                             break;
 
                         case 0x03:    // DIRECT SEQUNCE CHANNEL SET
@@ -462,7 +421,7 @@ int main(int argc, char * argv[]) {
                     pprobe->PWR = pwr;
                     pprobe->FRAMES++;
 
-                    snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", data_rate, "e", station_rate, "e");
+                    snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", pprobe->AP_RATE, pprobe->AP_QOS ? "e" : "", pprobe->STATION_RATE, pprobe->STATION_QOS ? "e" : "");
                     break;
                 }
             }
@@ -475,7 +434,7 @@ int main(int argc, char * argv[]) {
                 pprobe->FRAMES = 1;
                 pprobe->LOST = 0;
 
-                snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", data_rate, "e", station_rate, "e");
+                snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", pprobe->AP_RATE, pprobe->AP_QOS ? "e" : "", pprobe->STATION_RATE, pprobe->STATION_QOS ? "e" : "");
 
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
@@ -506,10 +465,9 @@ int main(int argc, char * argv[]) {
                 if (!memcmp(pprobe->STATION, ieee80211->source_addr, sizeof(pprobe->STATION))) {
                     check = 1;
                     pprobe->PWR = pwr;
-
                     pprobe->FRAMES++;
 
-                    snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", ap_rate, "e", data_rate, "e");
+                    snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", pprobe->AP_RATE, pprobe->AP_QOS ? "e" : "", pprobe->STATION_RATE, pprobe->STATION_QOS ? "e" : "");
                     break;
                 }
             }
@@ -522,7 +480,7 @@ int main(int argc, char * argv[]) {
                 pprobe->LOST = 0;
                 probe_seq[probe_req_count] = ieee80211->sequence_number;
                 
-                snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", ap_rate, "e", data_rate, "e");
+                snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", pprobe->AP_RATE, pprobe->AP_QOS ? "e" : "", pprobe->STATION_RATE, pprobe->STATION_QOS ? "e" : "");
 
                 fixed = (fixed_parameter *)((u_char *)ieee80211 + sizeof(ieee80211_header));
                 tagged = (tagged_parameter *)((u_char *)fixed + sizeof(fixed_parameter));
@@ -571,27 +529,46 @@ int main(int argc, char * argv[]) {
                 }
             }
 
-            if (to_ds == 0 && from_ds == 1) {
-                for (cnt = 0; cnt < beacon_count; cnt++) {
-                    pbeacon = beacon_info + cnt;
-                    if (!memcmp(pbeacon->BSSID, ieee80211->bssid_addr, sizeof(pbeacon->BSSID))) {
-                        pbeacon->PWR = pwr;
-                        pbeacon->DATA++;
+            if (memcmp(ieee80211->destination_addr, "\xFF\xFF\xFF\xFF\xFF\xFF", sizeof(pprobe->STATION))) {
+                if (from_ds == 1) {
+                    for (cnt = 0; cnt < beacon_count; cnt++) {
+                        pbeacon = beacon_info + cnt;
+                        if (!memcmp(pbeacon->BSSID, ieee80211->bssid_addr, sizeof(pbeacon->BSSID))) {
+                            pbeacon->PWR = pwr;
+                            pbeacon->DATA++;
+                        }
+                    }
+                    for (cnt = 0; cnt < probe_res_count; cnt++) {
+                        pprobe = probe_res_info + cnt;
+                        // if (!memcmp(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID))) {
+                        pprobe->STATION_RATE = data_rate;
+                        if (ieee80211->frame_control_subtype == 0x08) {
+                            pprobe->STATION_QOS = 1;
+                        }
+                        snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", pprobe->AP_RATE, pprobe->AP_QOS ? "e" : "", pprobe->STATION_RATE, pprobe->STATION_QOS ? "e" : "");
+                        // }
                     }
                 }
-            }
 
-            if (to_ds == 1 && from_ds == 0) {
-                for (cnt = 0; cnt < probe_req_count; cnt++) {
-                    pprobe = probe_req_info + cnt;
- 
-                    sequence = ieee80211->sequence_number - probe_seq[probe_req_count] - 1;
-                    if (sequence > 0 && sequence < 1000) {
-                        pprobe->LOST += sequence;
+                if (to_ds == 1) {
+                    for (cnt = 0; cnt < probe_req_count; cnt++) {
+                        pprobe = probe_req_info + cnt;
+                        // if (!memcmp(pprobe->BSSID, ieee80211->bssid_addr, sizeof(pprobe->BSSID))) {
+                        pprobe->AP_RATE = data_rate;
+                        if (ieee80211->frame_control_subtype == 0x08) {
+                            pprobe->AP_QOS = 1;
+                        }
+                        snprintf(pprobe->RATE, sizeof(pprobe->RATE), "%2d%1s-%2d%1s", pprobe->AP_RATE, pprobe->AP_QOS ? "e" : "", pprobe->STATION_RATE, pprobe->STATION_QOS ? "e" : "");
+
+                        sequence = ieee80211->sequence_number - probe_seq[cnt] - 1;
+                        if (sequence > 0 && sequence < 1000) {
+                            pprobe->LOST += sequence;
+                        }
+                        probe_seq[cnt] = ieee80211->sequence_number;
+                        // }
                     }
-                    probe_seq[probe_req_count] = ieee80211->sequence_number;
                 }
-            }
+            } 
         }
     }
     pcap_close(handle);
